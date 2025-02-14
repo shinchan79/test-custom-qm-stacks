@@ -2702,6 +2702,14 @@
               "Action": "support:DescribeTrustedAdvisorChecks",
               "Effect": "Allow",
               "Resource": "*"
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "ec2:DescribeVpcs",
+                "ec2:DescribeSubnets"
+              ],
+              "Resource": "*"
             }
           ],
           "Version": "2012-10-17"

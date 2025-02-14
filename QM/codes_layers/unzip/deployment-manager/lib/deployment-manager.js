@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.DeploymentManager = exports.DEPLOYMENT_MODEL = void 0;
 const solutions_utils_1 = require("solutions-utils");
+const AWS = require("aws-sdk");
 var DEPLOYMENT_MODEL;
 (function (DEPLOYMENT_MODEL) {
     DEPLOYMENT_MODEL["ORG"] = "Organizations";
@@ -34,8 +35,110 @@ class DeploymentManager {
                 ParameterKey: "ReportOKNotifications",
                 ParameterValue: process.env.SQ_REPORT_OK_NOTIFICATIONS,
             },
+            {
+                ParameterKey: "VpcId",
+                ParameterValue: "",
+            },
+            {
+                ParameterKey: "SubnetIds",
+                ParameterValue: "",
+            }
         ];
     }
+
+    // Thêm phương thức mới để discover VPC
+    async discoverVpcResources(region) {
+        try {
+            const ec2 = new AWS.EC2({ region });
+
+            solutions_utils_1.logger.info({
+                label: `${this.moduleName}/discoverVpcResources`,
+                message: `Starting VPC discovery in region ${region}`
+            });
+
+            // Lấy VPC với điều kiện:
+            // - Không phải default VPC
+            // - CIDR phải bắt đầu bằng "10."
+            const vpcs = await ec2.describeVpcs({
+                Filters: [
+                    { Name: 'isDefault', Values: ['false'] },
+                    { Name: 'cidr-block', Values: ['10.*'] }
+                ]
+            }).promise();
+
+            if (!vpcs.Vpcs || vpcs.Vpcs.length === 0) {
+                solutions_utils_1.logger.warn({
+                    label: `${this.moduleName}/discoverVpcResources`,
+                    message: `No suitable VPCs found in region ${region} (need non-default VPC with CIDR 10.x.x.x)`
+                });
+                return null;
+            }
+
+            const vpc = vpcs.Vpcs[0];
+            solutions_utils_1.logger.info({
+                label: `${this.moduleName}/discoverVpcResources`,
+                message: `Found suitable VPC: ${vpc.VpcId} with CIDR ${vpc.CidrBlock}`
+            });
+
+            // Lấy private subnet trong VPC đó
+            const subnets = await ec2.describeSubnets({
+                Filters: [
+                    { Name: 'vpc-id', Values: [vpc.VpcId] },
+                    { Name: 'map-public-ip-on-launch', Values: ['false'] }
+                ]
+            }).promise();
+
+            if (!subnets.Subnets || subnets.Subnets.length === 0) {
+                solutions_utils_1.logger.warn({
+                    label: `${this.moduleName}/discoverVpcResources`,
+                    message: `No private subnets found in VPC ${vpc.VpcId}`
+                });
+                return null;
+            }
+
+            // Log số lượng subnets tìm thấy
+            solutions_utils_1.logger.info({
+                label: `${this.moduleName}/discoverVpcResources`,
+                message: `Found ${subnets.Subnets.length} private subnets in VPC ${vpc.VpcId}`
+            });
+
+            // Tìm subnet phù hợp nhất
+            let selectedSubnet = subnets.Subnets.find(subnet =>
+                subnet.Tags &&
+                subnet.Tags.some(tag =>
+                    tag.Key === 'Name' &&
+                    tag.Value.toLowerCase().includes('app')
+                )
+            );
+    
+            if (!selectedSubnet) {
+                selectedSubnet = subnets.Subnets[0];
+                solutions_utils_1.logger.info({
+                    label: `${this.moduleName}/discoverVpcResources`,
+                    message: `No subnet with 'app' in name found, using first available subnet ${selectedSubnet.SubnetId}`
+                });
+            } else {
+                solutions_utils_1.logger.info({
+                    label: `${this.moduleName}/discoverVpcResources`,
+                    message: `Found subnet with 'app' tag: ${selectedSubnet.SubnetId}`
+                });
+            }
+
+            return {
+                vpcId: vpc.VpcId,
+                subnetIds: [selectedSubnet.SubnetId]
+            };
+
+        } catch (error) {
+            solutions_utils_1.logger.error({
+                label: `${this.moduleName}/discoverVpcResources`,
+                message: `Error discovering VPC resources: ${error}`,
+                error: error // Include full error object for debugging
+            });
+            return null;
+        }
+    }
+
     async manageDeployments() {
         const principals = await this.getPrincipals();
         const organizationId = await this.getOrganizationId();
@@ -213,9 +316,40 @@ class DeploymentManager {
         }
     }
     async manageStackSetInstances(stackSet, deploymentTargets, regions, spokeDeploymentMetricData, parameterOverrides) {
+        // Discover VPC resources cho mỗi region
+        for (const region of regions) {
+            solutions_utils_1.logger.info({
+                label: `${this.moduleName}/manageStackSetInstances`,
+                message: `Discovering VPC resources for region ${region}`
+            });
+
+            const vpcResources = await this.discoverVpcResources(region);
+            if (vpcResources && parameterOverrides) {
+                // Cập nhật parameter overrides với thông tin VPC và subnet
+                const vpcParam = parameterOverrides.find(p => p.ParameterKey === "VpcId");
+                const subnetParam = parameterOverrides.find(p => p.ParameterKey === "SubnetIds");
+
+                if (vpcParam) {
+                    vpcParam.ParameterValue = vpcResources.vpcId;
+                    solutions_utils_1.logger.info({
+                        label: `${this.moduleName}/manageStackSetInstances`,
+                        message: `Updated VpcId parameter: ${vpcResources.vpcId}`
+                    });
+                }
+
+                if (subnetParam) {
+                    subnetParam.ParameterValue = vpcResources.subnetIds.join(',');
+                    solutions_utils_1.logger.info({
+                        label: `${this.moduleName}/manageStackSetInstances`,
+                        message: `Updated SubnetIds parameter: ${vpcResources.subnetIds.join(',')}`
+                    });
+                }
+            }
+        }
+
         const deployedRegions = await stackSet.getDeployedRegions();
-        const regionsToRemove = (0, solutions_utils_1.arrayDiff)(deployedRegions, regions);
-        const regionsNetNew = (0, solutions_utils_1.arrayDiff)(regions, deployedRegions);
+        const regionsToRemove = solutions_utils_1.arrayDiff(deployedRegions, regions);
+        const regionsNetNew = solutions_utils_1.arrayDiff(regions, deployedRegions);
         solutions_utils_1.logger.debug({
             label: `${this.moduleName}/handler/manageStackSetInstances ${stackSet.stackSetName}`,
             message: `deployedRegions: ${JSON.stringify(deployedRegions)}`,

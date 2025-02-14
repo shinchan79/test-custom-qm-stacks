@@ -1,0 +1,683 @@
+{
+  "Description": "(SO0005-TA) - quota-monitor-for-aws - Trusted Advisor Template. Version v6.3.0",
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Metadata": {
+    "AWS::CloudFormation::Interface": {
+      "ParameterGroups": [
+        {
+          "Label": {
+            "default": "Monitoring Account Configuration"
+          },
+          "Parameters": [
+            "EventBusArn"
+          ]
+        },
+        {
+          "Label": {
+            "default": "Refresh Configuration"
+          },
+          "Parameters": [
+            "TARefreshRate"
+          ]
+        },
+        {
+          "Label": {
+            "default": "VPC Configuration"
+          },
+          "Parameters": [
+            "VpcId",
+            "SubnetIds"
+          ]
+        },
+        {
+          "Label": {
+            "default": "S3 Configuration"
+          },
+          "Parameters": [
+            "S3BucketName",
+            "S3LambdaKeyPrefix",
+            "S3LayerKeyPrefix"
+          ]
+        }
+      ],
+      "ParameterLabels": {
+        "EventBusArn": {
+          "default": "Arn for the EventBridge bus in the monitoring account"
+        },
+        "TARefreshRate": {
+          "default": "Trusted Advisor Refresh Rate"
+        },
+        "VpcId": {
+          "default": "VPC ID for Lambda functions"
+        },
+        "SubnetIds": {
+          "default": "Subnet IDs for Lambda functions"
+        },
+        "S3BucketName": {
+          "default": "Base name of the S3 bucket containing deployment assets (without region suffix)"
+        },
+        "S3LambdaKeyPrefix": {
+          "default": "S3 key prefix for Lambda functions"
+        },
+        "S3LayerKeyPrefix": {
+          "default": "S3 key prefix for Lambda layers"
+        }
+      }
+    }
+  },
+  "Parameters": {
+    "EventBusArn": {
+      "Type": "String"
+    },
+    "TARefreshRate": {
+      "Type": "String",
+      "Default": "rate(12 hours)",
+      "AllowedValues": [
+        "rate(6 hours)",
+        "rate(12 hours)",
+        "rate(1 day)"
+      ],
+      "Description": "The rate at which to refresh Trusted Advisor checks"
+    },
+    "VpcId": {
+      "Type": "AWS::EC2::VPC::Id",
+      "Description": "VPC ID for Lambda functions"
+    },
+    "SubnetIds": {
+      "Type": "List<AWS::EC2::Subnet::Id>",
+      "Description": "List of subnet IDs for Lambda functions"
+    },
+    "S3BucketName": {
+      "Type": "String",
+      "Description": "Name of the S3 bucket containing deployment assets"
+    },
+    "S3LambdaKeyPrefix": {
+      "Type": "String",
+      "Default": "quota-monitor-for-aws/v6.3.0/lambda/",
+      "Description": "S3 key prefix for Lambda function assets"
+    },
+    "S3LayerKeyPrefix": {
+      "Type": "String",
+      "Default": "quota-monitor-for-aws/v6.3.0/layers/",
+      "Description": "S3 key prefix for Lambda layer assets"
+    }
+  },
+  "Resources": {
+    "QMDefaultSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "Default security group for Quota Monitor Lambda functions",
+        "VpcId": {
+          "Ref": "VpcId"
+        },
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow all outbound traffic",
+            "IpProtocol": "-1"
+          }
+        ]
+      }
+    },
+    "TAOkRule3B6A3866": {
+      "Type": "AWS::Events::Rule",
+      "Properties": {
+        "Description": "Quota Monitor Solution - Spoke - Rule for TA OK events",
+        "EventPattern": {
+          "account": [
+            {
+              "Ref": "AWS::AccountId"
+            }
+          ],
+          "detail": {
+            "status": [
+              "OK"
+            ],
+            "check-item-detail": {
+              "Service": [
+                "AutoScaling",
+                "CloudFormation",
+                "DynamoDB",
+                "EBS",
+                "EC2",
+                "ELB",
+                "IAM",
+                "Kinesis",
+                "RDS",
+                "Route53",
+                "SES",
+                "VPC"
+              ]
+            }
+          },
+          "detail-type": [
+            "Trusted Advisor Check Item Refresh Notification"
+          ],
+          "source": [
+            "aws.trustedadvisor"
+          ]
+        },
+        "State": "ENABLED",
+        "Targets": [
+          {
+            "Arn": {
+              "Ref": "EventBusArn"
+            },
+            "Id": "Target0",
+            "RoleArn": {
+              "Fn::GetAtt": [
+                "TAOkRuleEventsRole78AEFB32",
+                "Arn"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "TAOkRuleEventsRole78AEFB32": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "events.amazonaws.com"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        }
+      }
+    },
+    "TAOkRuleEventsRoleDefaultPolicyFAB70645": {
+      "Type": "AWS::IAM::Policy",
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "events:PutEvents",
+              "Effect": "Allow",
+              "Resource": {
+                "Ref": "EventBusArn"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "PolicyName": "TAOkRuleEventsRoleDefaultPolicyFAB70645",
+        "Roles": [
+          {
+            "Ref": "TAOkRuleEventsRole78AEFB32"
+          }
+        ]
+      }
+    },
+    "TAWarnRule4E0A6126": {
+      "Type": "AWS::Events::Rule",
+      "Properties": {
+        "Description": "Quota Monitor Solution - Spoke - Rule for TA WARN events",
+        "EventPattern": {
+          "account": [
+            {
+              "Ref": "AWS::AccountId"
+            }
+          ],
+          "detail": {
+            "status": [
+              "WARN"
+            ],
+            "check-item-detail": {
+              "Service": [
+                "AutoScaling",
+                "CloudFormation",
+                "DynamoDB",
+                "EBS",
+                "EC2",
+                "ELB",
+                "IAM",
+                "Kinesis",
+                "RDS",
+                "Route53",
+                "SES",
+                "VPC"
+              ]
+            }
+          },
+          "detail-type": [
+            "Trusted Advisor Check Item Refresh Notification"
+          ],
+          "source": [
+            "aws.trustedadvisor"
+          ]
+        },
+        "State": "ENABLED",
+        "Targets": [
+          {
+            "Arn": {
+              "Ref": "EventBusArn"
+            },
+            "Id": "Target0",
+            "RoleArn": {
+              "Fn::GetAtt": [
+                "TAWarnRuleEventsRole92C70288",
+                "Arn"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "TAWarnRuleEventsRole92C70288": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "events.amazonaws.com"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        }
+      }
+    },
+    "TAWarnRuleEventsRoleDefaultPolicyB0AE7261": {
+      "Type": "AWS::IAM::Policy",
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "events:PutEvents",
+              "Effect": "Allow",
+              "Resource": {
+                "Ref": "EventBusArn"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "PolicyName": "TAWarnRuleEventsRoleDefaultPolicyB0AE7261",
+        "Roles": [
+          {
+            "Ref": "TAWarnRuleEventsRole92C70288"
+          }
+        ]
+      }
+    },
+    "TAErrorRule6720C8C4": {
+      "Type": "AWS::Events::Rule",
+      "Properties": {
+        "Description": "Quota Monitor Solution - Spoke - Rule for TA ERROR events",
+        "EventPattern": {
+          "account": [
+            {
+              "Ref": "AWS::AccountId"
+            }
+          ],
+          "detail": {
+            "status": [
+              "ERROR"
+            ],
+            "check-item-detail": {
+              "Service": [
+                "AutoScaling",
+                "CloudFormation",
+                "DynamoDB",
+                "EBS",
+                "EC2",
+                "ELB",
+                "IAM",
+                "Kinesis",
+                "RDS",
+                "Route53",
+                "SES",
+                "VPC"
+              ]
+            }
+          },
+          "detail-type": [
+            "Trusted Advisor Check Item Refresh Notification"
+          ],
+          "source": [
+            "aws.trustedadvisor"
+          ]
+        },
+        "State": "ENABLED",
+        "Targets": [
+          {
+            "Arn": {
+              "Ref": "EventBusArn"
+            },
+            "Id": "Target0",
+            "RoleArn": {
+              "Fn::GetAtt": [
+                "TAErrorRuleEventsRoleB879CF53",
+                "Arn"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "TAErrorRuleEventsRoleB879CF53": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "events.amazonaws.com"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        }
+      }
+    },
+    "TAErrorRuleEventsRoleDefaultPolicy270A14C5": {
+      "Type": "AWS::IAM::Policy",
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "events:PutEvents",
+              "Effect": "Allow",
+              "Resource": {
+                "Ref": "EventBusArn"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "PolicyName": "TAErrorRuleEventsRoleDefaultPolicy270A14C5",
+        "Roles": [
+          {
+            "Ref": "TAErrorRuleEventsRoleB879CF53"
+          }
+        ]
+      }
+    },
+    "QMUtilsLayerQMUtilsLayerLayer80D5D993": {
+      "Type": "AWS::Lambda::LayerVersion",
+      "Properties": {
+        "CompatibleRuntimes": [
+          "nodejs18.x"
+        ],
+        "Content": {
+          "S3Bucket": {
+            "Fn::Join": [
+                "-",
+                [
+                    {"Ref": "S3BucketName"},
+                    {"Ref": "AWS::Region"}
+                ]
+            ]
+          },
+          "S3Key": {
+            "Fn::Join": [
+              "",
+              [
+                {"Ref": "S3LayerKeyPrefix"},
+                "utils-layer.zip"
+              ]
+            ]
+          }
+        },
+        "LayerName": "QM-UtilsLayer"
+      }
+    },
+    "QMTARefresherQMTARefresherEventsRuleDCF4B340": {
+      "Type": "AWS::Events::Rule",
+      "Properties": {
+        "Description": "SO0005 quota-monitor-for-aws - QM-TA-Refresher-EventsRule",
+        "ScheduleExpression": {
+          "Ref": "TARefreshRate"
+        },
+        "State": "ENABLED",
+        "Targets": [
+          {
+            "Arn": {
+              "Fn::GetAtt": [
+                "QMTARefresherQMTARefresherLambdaEE100499",
+                "Arn"
+              ]
+            },
+            "Id": "Target0"
+          }
+        ]
+      }
+    },
+    "QMTARefresherQMTARefresherEventsRuleAllowEventRulequotamonitortaspokeQMTARefresherQMTARefresherLambda859D552E0BE87577": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "QMTARefresherQMTARefresherLambdaEE100499",
+            "Arn"
+          ]
+        },
+        "Principal": "events.amazonaws.com",
+        "SourceArn": {
+          "Fn::GetAtt": [
+            "QMTARefresherQMTARefresherEventsRuleDCF4B340",
+            "Arn"
+          ]
+        }
+      }
+    },
+    "QMTARefresherQMTARefresherLambdaDeadLetterQueueC938ED3A": {
+      "Type": "AWS::SQS::Queue",
+      "Properties": {
+        "KmsMasterKeyId": "alias/aws/sqs"
+      },
+      "UpdateReplacePolicy": "Delete",
+      "DeletionPolicy": "Delete"
+    },
+    "QMTARefresherQMTARefresherLambdaDeadLetterQueuePolicy61A9C7A5": {
+      "Type": "AWS::SQS::QueuePolicy",
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sqs:*",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false"
+                }
+              },
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": "*"
+              },
+              "Resource": {
+                "Fn::GetAtt": [
+                  "QMTARefresherQMTARefresherLambdaDeadLetterQueueC938ED3A",
+                  "Arn"
+                ]
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "Queues": [
+          {
+            "Ref": "QMTARefresherQMTARefresherLambdaDeadLetterQueueC938ED3A"
+          }
+        ]
+      }
+    },
+    "QMTARefresherQMTARefresherLambdaServiceRole95E5A974": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition"
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+              ]
+            ]
+          },
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition"
+                },
+                ":iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    "QMTARefresherQMTARefresherLambdaServiceRoleDefaultPolicyF0E3A261": {
+      "Type": "AWS::IAM::Policy",
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sqs:SendMessage",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "QMTARefresherQMTARefresherLambdaDeadLetterQueueC938ED3A",
+                  "Arn"
+                ]
+              }
+            },
+            {
+              "Action": "support:RefreshTrustedAdvisorCheck",
+              "Effect": "Allow",
+              "Resource": "*"
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "PolicyName": "QMTARefresherQMTARefresherLambdaServiceRoleDefaultPolicyF0E3A261",
+        "Roles": [
+          {
+            "Ref": "QMTARefresherQMTARefresherLambdaServiceRole95E5A974"
+          }
+        ]
+      }
+    },
+    "QMTARefresherQMTARefresherLambdaEE100499": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "Code": {
+          "S3Bucket": {
+            "Fn::Join": [
+                "-",
+                [
+                    {"Ref": "S3BucketName"},
+                    {"Ref": "AWS::Region"}
+                ]
+            ]
+          },
+          "S3Key": {
+            "Fn::Join": [
+              "",
+              [
+                {"Ref": "S3LambdaKeyPrefix"},
+                "ta-refresher.zip"
+              ]
+            ]
+          }
+        },
+        "DeadLetterConfig": {
+          "TargetArn": {
+            "Fn::GetAtt": [
+              "QMTARefresherQMTARefresherLambdaDeadLetterQueueC938ED3A",
+              "Arn"
+            ]
+          }
+        },
+        "Description": "SO0005 quota-monitor-for-aws - QM-TA-Refresher-Lambda",
+        "Environment": {
+          "Variables": {
+            "AWS_SERVICES": "AutoScaling,CloudFormation,DynamoDB,EBS,EC2,ELB,IAM,Kinesis,RDS,Route53,SES,VPC",
+            "LOG_LEVEL": "info",
+            "CUSTOM_SDK_USER_AGENT": "AwsSolution/SO0005/v6.3.0",
+            "VERSION": "v6.3.0",
+            "SOLUTION_ID": "SO0005"
+          }
+        },
+        "Handler": "index.handler",
+        "Layers": [
+          {
+            "Ref": "QMUtilsLayerQMUtilsLayerLayer80D5D993"
+          }
+        ],
+        "MemorySize": 128,
+        "Role": {
+          "Fn::GetAtt": [
+            "QMTARefresherQMTARefresherLambdaServiceRole95E5A974",
+            "Arn"
+          ]
+        },
+        "Runtime": "nodejs18.x",
+        "Timeout": 60,
+        "VpcConfig": {
+          "SecurityGroupIds": [
+            {
+              "Fn::GetAtt": [
+                "QMDefaultSecurityGroup",
+                "GroupId"
+              ]
+            }
+          ],
+          "SubnetIds": {
+            "Ref": "SubnetIds"
+          }
+        }
+      },
+      "DependsOn": [
+        "QMTARefresherQMTARefresherLambdaServiceRoleDefaultPolicyF0E3A261",
+        "QMTARefresherQMTARefresherLambdaServiceRole95E5A974"
+      ]
+    },
+    "QMTARefresherQMTARefresherLambdaEventInvokeConfig4EDB1B2A": {
+      "Type": "AWS::Lambda::EventInvokeConfig",
+      "Properties": {
+        "FunctionName": {
+          "Ref": "QMTARefresherQMTARefresherLambdaEE100499"
+        },
+        "MaximumEventAgeInSeconds": 14400,
+        "Qualifier": "$LATEST"
+      }
+    }
+  },
+  "Outputs": {
+    "ServiceChecks": {
+      "Description": "service limit checks monitored in the account",
+      "Value": "AutoScaling,CloudFormation,DynamoDB,EBS,EC2,ELB,IAM,Kinesis,RDS,Route53,SES,VPC"
+    }
+  }
+}

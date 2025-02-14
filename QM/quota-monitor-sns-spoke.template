@@ -1,0 +1,495 @@
+{
+  "Description": "(SO0005-SPOKE-SNS) - quota-monitor-for-aws - Service Quotas Template. Version v6.3.0",
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Parameters": {
+    "VpcId": {
+      "Type": "AWS::EC2::VPC::Id",
+      "Description": "VPC ID for Lambda functions"
+    },
+    "SubnetIds": {
+      "Type": "List<AWS::EC2::Subnet::Id>",
+      "Description": "List of subnet IDs for Lambda functions"
+    },
+    "S3BucketName": {
+      "Type": "String",
+      "Description": "Base name of the S3 bucket containing deployment assets (without region suffix)"
+    },
+    "S3LambdaKeyPrefix": {
+      "Type": "String",
+      "Default": "quota-monitor-for-aws/v6.3.0/lambda/",
+      "Description": "S3 key prefix for Lambda function assets"
+    },
+    "S3LayerKeyPrefix": {
+      "Type": "String",
+      "Default": "quota-monitor-for-aws/v6.3.0/layers/",
+      "Description": "S3 key prefix for Lambda layer assets"
+    }
+  },
+  "Mappings": {
+    "QuotaMonitorMap": {
+      "SSMParameters": {
+        "NotificationMutingConfig": "/QuotaMonitor/spoke/NotificationConfiguration"
+      }
+    }
+  },
+  "Resources": {
+    "QMDefaultSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "Default security group for Quota Monitor Lambda functions",
+        "VpcId": {
+          "Ref": "VpcId"
+        },
+        "SecurityGroupEgress": [
+          {
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Allow all outbound traffic",
+            "IpProtocol": "-1"
+          }
+        ]
+      }
+    },
+    "QMSNSSpokeBus29B8E7E8": {
+      "Type": "AWS::Events::EventBus",
+      "Properties": {
+        "Name": "QuotaMonitorSnsSpokeBus"
+      },
+      "Metadata": {
+        "aws:cdk:path": "quota-monitor-sns-spoke/QM-SNS-Spoke-Bus/Resource"
+      }
+    },
+    "QMSNSSpokeBusallowedaccounts10D05AD6": {
+      "Type": "AWS::Events::EventBusPolicy",
+      "Properties": {
+        "EventBusName": {
+          "Ref": "QMSNSSpokeBus29B8E7E8"
+        },
+        "Statement": {
+          "Action": "events:PutEvents",
+          "Effect": "Allow",
+          "Principal": {
+            "AWS": {
+              "Fn::Join": [
+                "",
+                [
+                  "arn:",
+                  {
+                    "Ref": "AWS::Partition"
+                  },
+                  ":iam::",
+                  {
+                    "Ref": "AWS::AccountId"
+                  },
+                  ":root"
+                ]
+              ]
+            }
+          },
+          "Resource": {
+            "Fn::GetAtt": [
+              "QMSNSSpokeBus29B8E7E8",
+              "Arn"
+            ]
+          },
+          "Sid": "allowed_accounts"
+        },
+        "StatementId": "allowed_accounts"
+      }
+    },
+    "QMUtilsLayerquotamonitorsnsspokeQMUtilsLayerquotamonitorsnsspokeLayer4E29C1C4": {
+      "Type": "AWS::Lambda::LayerVersion",
+      "Properties": {
+        "CompatibleRuntimes": [
+          "nodejs18.x"
+        ],
+        "Content": {
+          "S3Bucket": {
+              "Fn::Join": [
+                  "-",
+                  [
+                      {"Ref": "S3BucketName"},
+                      {"Ref": "AWS::Region"}
+                  ]
+              ]
+          },
+          "S3Key": {
+            "Fn::Join": [
+              "",
+              [
+                {"Ref": "S3LayerKeyPrefix"},
+                "utils-layer.zip"
+              ]
+            ]
+          }
+        },
+        "LayerName": "QM-UtilsLayer-quota-monitor-sns-spoke"
+      }
+    },
+    "sqspokeNotificationMutingConfigE6DD8BD9": {
+      "Type": "AWS::SSM::Parameter",
+      "Properties": {
+        "Description": "Muting configuration for services, limits e.g. ec2:L-1216C47A,ec2:Running On-Demand Standard (A, C, D, H, I, M, R, T, Z) instances,dynamodb,logs:*,geo:L-05EFD12D",
+        "Name": {
+          "Fn::FindInMap": [
+            "QuotaMonitorMap",
+            "SSMParameters",
+            "NotificationMutingConfig"
+          ]
+        },
+        "Type": "StringList",
+        "Value": "NOP"
+      }
+    },
+    "sqspokeSNSPublishersqspokeSNSPublisherSNSTopic5C405BCF": {
+      "Type": "AWS::SNS::Topic",
+      "Properties": {
+        "KmsMasterKeyId": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:",
+              {
+                "Ref": "AWS::Partition"
+              },
+              ":kms:",
+              {
+                "Ref": "AWS::Region"
+              },
+              ":",
+              {
+                "Ref": "AWS::AccountId"
+              },
+              ":alias/aws/sns"
+            ]
+          ]
+        }
+      }
+    },
+    "sqspokeSNSPublisherFunctionsqspokeSNSPublisherFunctionEventsRule7B09C7F3": {
+      "Type": "AWS::Events::Rule",
+      "Properties": {
+        "Description": "SO0005 quota-monitor-for-aws - sq-spoke-SNSPublisherFunction-EventsRule",
+        "EventBusName": {
+          "Ref": "QMSNSSpokeBus29B8E7E8"
+        },
+        "EventPattern": {
+          "detail": {
+            "status": [
+              "WARN",
+              "ERROR"
+            ]
+          },
+          "detail-type": [
+            "Trusted Advisor Check Item Refresh Notification",
+            "Service Quotas Utilization Notification"
+          ],
+          "source": [
+            "aws.trustedadvisor",
+            "aws-solutions.quota-monitor"
+          ]
+        },
+        "State": "ENABLED",
+        "Targets": [
+          {
+            "Arn": {
+              "Fn::GetAtt": [
+                "sqspokeSNSPublisherFunctionsqspokeSNSPublisherFunctionLambdaC0F8A9BF",
+                "Arn"
+              ]
+            },
+            "Id": "Target0"
+          }
+        ]
+      }
+    },
+    "sqspokeSNSPublisherFunctionsqspokeSNSPublisherFunctionEventsRuleAllowEventRulequotamonitorsnsspokesqspokeSNSPublisherFunctionsqspokeSNSPublisherFunctionLambda39FBB9D6A259BAD9": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "sqspokeSNSPublisherFunctionsqspokeSNSPublisherFunctionLambdaC0F8A9BF",
+            "Arn"
+          ]
+        },
+        "Principal": "events.amazonaws.com",
+        "SourceArn": {
+          "Fn::GetAtt": [
+            "sqspokeSNSPublisherFunctionsqspokeSNSPublisherFunctionEventsRule7B09C7F3",
+            "Arn"
+          ]
+        }
+      }
+    },
+    "sqspokeSNSPublisherFunctionsqspokeSNSPublisherFunctionLambdaDeadLetterQueue83F0C565": {
+      "Type": "AWS::SQS::Queue",
+      "Properties": {
+        "KmsMasterKeyId": "alias/aws/sqs"
+      },
+      "UpdateReplacePolicy": "Delete",
+      "DeletionPolicy": "Delete"
+    },
+    "sqspokeSNSPublisherFunctionsqspokeSNSPublisherFunctionLambdaDeadLetterQueuePolicyB89E703A": {
+      "Type": "AWS::SQS::QueuePolicy",
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sqs:*",
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false"
+                }
+              },
+              "Effect": "Deny",
+              "Principal": {
+                "AWS": "*"
+              },
+              "Resource": {
+                "Fn::GetAtt": [
+                  "sqspokeSNSPublisherFunctionsqspokeSNSPublisherFunctionLambdaDeadLetterQueue83F0C565",
+                  "Arn"
+                ]
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "Queues": [
+          {
+            "Ref": "sqspokeSNSPublisherFunctionsqspokeSNSPublisherFunctionLambdaDeadLetterQueue83F0C565"
+          }
+        ]
+      }
+    },
+    "sqspokeSNSPublisherFunctionsqspokeSNSPublisherFunctionLambdaServiceRoleE4D78096": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition"
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+              ]
+            ]
+          },
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition"
+                },
+                ":iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    "sqspokeSNSPublisherFunctionsqspokeSNSPublisherFunctionLambdaServiceRoleDefaultPolicyEAE21A8E": {
+      "Type": "AWS::IAM::Policy",
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sqs:SendMessage",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "sqspokeSNSPublisherFunctionsqspokeSNSPublisherFunctionLambdaDeadLetterQueue83F0C565",
+                  "Arn"
+                ]
+              }
+            },
+            {
+              "Action": "SNS:Publish",
+              "Effect": "Allow",
+              "Resource": {
+                "Ref": "sqspokeSNSPublishersqspokeSNSPublisherSNSTopic5C405BCF"
+              }
+            },
+            {
+              "Action": "kms:GenerateDataKey",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition"
+                    },
+                    ":kms:",
+                    {
+                      "Ref": "AWS::Region"
+                    },
+                    ":",
+                    {
+                      "Ref": "AWS::AccountId"
+                    },
+                    ":alias/aws/sns"
+                  ]
+                ]
+              }
+            },
+            {
+              "Action": "ssm:GetParameter",
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::Join": [
+                  "",
+                  [
+                    "arn:",
+                    {
+                      "Ref": "AWS::Partition"
+                    },
+                    ":ssm:",
+                    {
+                      "Ref": "AWS::Region"
+                    },
+                    ":",
+                    {
+                      "Ref": "AWS::AccountId"
+                    },
+                    ":parameter",
+                    {
+                      "Ref": "sqspokeNotificationMutingConfigE6DD8BD9"
+                    }
+                  ]
+                ]
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "PolicyName": "sqspokeSNSPublisherFunctionsqspokeSNSPublisherFunctionLambdaServiceRoleDefaultPolicyEAE21A8E",
+        "Roles": [
+          {
+            "Ref": "sqspokeSNSPublisherFunctionsqspokeSNSPublisherFunctionLambdaServiceRoleE4D78096"
+          }
+        ]
+      }
+    },
+    "sqspokeSNSPublisherFunctionsqspokeSNSPublisherFunctionLambdaC0F8A9BF": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "Code": {
+          "S3Bucket": {
+              "Fn::Join": [
+                  "-",
+                  [
+                      {"Ref": "S3BucketName"},
+                      {"Ref": "AWS::Region"}
+                  ]
+              ]
+          },
+          "S3Key": {
+            "Fn::Join": [
+              "",
+              [
+                {"Ref": "S3LambdaKeyPrefix"},
+                "sns-publisher.zip"
+              ]
+            ]
+          }
+        },
+        "DeadLetterConfig": {
+          "TargetArn": {
+            "Fn::GetAtt": [
+              "sqspokeSNSPublisherFunctionsqspokeSNSPublisherFunctionLambdaDeadLetterQueue83F0C565",
+              "Arn"
+            ]
+          }
+        },
+        "Description": "SO0005 quota-monitor-for-aws - sq-spoke-SNSPublisherFunction-Lambda",
+        "Environment": {
+          "Variables": {
+            "QM_NOTIFICATION_MUTING_CONFIG_PARAMETER": {
+              "Ref": "sqspokeNotificationMutingConfigE6DD8BD9"
+            },
+            "SEND_METRIC": "No",
+            "TOPIC_ARN": {
+              "Ref": "sqspokeSNSPublishersqspokeSNSPublisherSNSTopic5C405BCF"
+            },
+            "LOG_LEVEL": "info",
+            "CUSTOM_SDK_USER_AGENT": "AwsSolution/SO0005/v6.3.0",
+            "VERSION": "v6.3.0",
+            "SOLUTION_ID": "SO0005"
+          }
+        },
+        "Handler": "index.handler",
+        "Layers": [
+          {
+            "Ref": "QMUtilsLayerquotamonitorsnsspokeQMUtilsLayerquotamonitorsnsspokeLayer4E29C1C4"
+          }
+        ],
+        "MemorySize": 128,
+        "Role": {
+          "Fn::GetAtt": [
+            "sqspokeSNSPublisherFunctionsqspokeSNSPublisherFunctionLambdaServiceRoleE4D78096",
+            "Arn"
+          ]
+        },
+        "Runtime": "nodejs18.x",
+        "Timeout": 120,
+        "VpcConfig": {
+          "SecurityGroupIds": [
+            {
+              "Fn::GetAtt": [
+                "QMDefaultSecurityGroup",
+                "GroupId"
+              ]
+            }
+          ],
+          "SubnetIds": {
+            "Ref": "SubnetIds"
+          }
+        }
+      },
+      "DependsOn": [
+        "sqspokeSNSPublisherFunctionsqspokeSNSPublisherFunctionLambdaServiceRoleDefaultPolicyEAE21A8E",
+        "sqspokeSNSPublisherFunctionsqspokeSNSPublisherFunctionLambdaServiceRoleE4D78096"
+      ]
+    },
+    "sqspokeSNSPublisherFunctionsqspokeSNSPublisherFunctionLambdaEventInvokeConfigBD6349C2": {
+      "Type": "AWS::Lambda::EventInvokeConfig",
+      "Properties": {
+        "FunctionName": {
+          "Ref": "sqspokeSNSPublisherFunctionsqspokeSNSPublisherFunctionLambdaC0F8A9BF"
+        },
+        "MaximumEventAgeInSeconds": 14400,
+        "Qualifier": "$LATEST"
+      }
+    }
+  },
+  "Outputs": {
+    "SpokeSnsEventBus": {
+      "Description": "SNS Event Bus Arn in spoke account",
+      "Value": {
+        "Fn::GetAtt": [
+          "QMSNSSpokeBus29B8E7E8",
+          "Arn"
+        ]
+      }
+    }
+  }
+}

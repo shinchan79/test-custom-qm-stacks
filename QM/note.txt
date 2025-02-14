@@ -1,0 +1,26 @@
+Lỗi khi deploy stack set: 
+
+Parameter validation failed: parameter value vpc-0d3064b9cdc76d323 for parameter name VpcId does not exist, parameter value subnet-0a9cbe2630624abb1 for parameter name SubnetIds does not exist, parameter value subnet-04c4acc506184479e for parameter name SubnetIds does not exist. Delete requested by user.
+
+Cancelled since failure tolerance has exceeded
+
+Đối với stack QM 
+
+Stack TA thì không có instance vì không có gói support 
+
+stack sns cũng lỗi: 
+
+301664410103
+ap-southeast-1
+arn:aws:cloudformation:ap-southeast-1:301664410103:stack/StackSet-QM-SNS-Spoke-StackSet-5d012faa-79f0-48ac-a02a-6a364818e5e1/c4397e20-e9fb-11ef-adbf-0265aef78563
+CANCELLED
+acfec6d0-937b-4a0f-83f8-0166b9b55e0e
+Cancelled since failure tolerance has exceeded
+NOT_CHECKED
+-
+405142580014
+ap-southeast-1
+arn:aws:cloudformation:ap-southeast-1:405142580014:stack/StackSet-QM-SNS-Spoke-StackSet-4fa7fe65-aa78-48c9-9f89-e8eda1dca70e/d0eed1b0-e9fb-11ef-95d8-06a5f8055ce7
+FAILED
+acfec6d0-937b-4a0f-83f8-0166b9b55e0e
+User Initiated
